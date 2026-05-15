@@ -23,15 +23,15 @@ def eh_lixo(titulo, corpo):
     texto = f"{titulo} {corpo}".lower()
     return any(p in texto for p in PALAVRAS_LIXO)
 
-def extrair_conversation_id(titulo):
-    match = re.search(r"\[CONV-(.*?)\]", titulo)
-    return match.group(1) if match else None
+def extrair_conversation_id(texto):
+    match = re.search(r"ID Conversa:\s*(.*)", texto or "")
+    return match.group(1).strip() if match else None
 
 def fechar_duplicatas(issues_lista):
     grupos = defaultdict(list)
 
     for issue in issues_lista:
-        conv_id = extrair_conversation_id(issue.title)
+        conv_id = extrair_conversation_id(issue.body)
         if conv_id:
             grupos[conv_id].append(issue)
 
@@ -48,10 +48,7 @@ def fechar_duplicatas(issues_lista):
                 dup.create_comment(
                     f"Fechada automaticamente como duplicata da Issue #{manter.number}."
                 )
-                dup.edit(
-                    state="closed",
-                    state_reason="not_planned"
-                )
+                dup.edit(state="closed", state_reason="not_planned")
             except Exception as e:
                 print(f"Erro ao fechar duplicata #{dup.number}: {e}")
 
@@ -87,11 +84,14 @@ if not emails:
     exit()
 
 prompt = f"""
-Você é um agente de gestão de e-mails de Engenharia, Projetos e CapEx.
+Você é um agente de gestão de e-mails de Engenharia, Projetos, CapEx e Implantação.
+
+Seu objetivo é analisar e consolidar informações relevantes dos e-mails.
 
 Analise os e-mails abaixo, agrupe por projeto ou assunto e retorne SOMENTE JSON válido.
 
-Cada item do JSON deve ter estes campos:
+Cada item do JSON deve conter:
+
 - projeto_assunto
 - status
 - pendencia
@@ -100,6 +100,8 @@ Cada item do JSON deve ter estes campos:
 - ultima_atualizacao
 - proximo_passo
 - risco
+- entrega_projeto
+- grd_aprovado
 
 Status permitidos:
 - Pendente comigo
@@ -110,16 +112,54 @@ Status permitidos:
 - Informativo
 
 Regras obrigatórias:
+
 - Não invente informações.
-- Use apenas os dados dos e-mails.
-- Se não identificar, escreva "não identificado".
-- Se não houver ação, escreva "sem ação necessária".
-- A data de última atualização deve considerar o e-mail mais recente daquele projeto/assunto.
-- Ignore e-mails automáticos, newsletters, notificações e assuntos sem relevância de gestão.
-- Priorize pendências, prazos, decisões, cobranças e riscos.
-- Se houver pergunta direcionada ao Felipe sem resposta posterior dele, classifique como "Pendente comigo".
-- Se Felipe cobrou alguém e não houver resposta posterior, classifique como "Aguardando terceiro".
-- Se houver decisão técnica, contratual ou gerencial sem definição, classifique como "Travado".
+- Utilize apenas os dados encontrados nos e-mails.
+- Se não identificar uma informação, escrever "não identificado".
+- Se não houver ação necessária, escrever "sem ação necessária".
+- Considere sempre o e-mail mais recente do assunto/projeto.
+- Ignore e-mails automáticos, newsletters, Teams, notificações e mensagens sem relevância de gestão.
+- Priorize:
+  - entregas de projeto;
+  - aprovações;
+  - pendências;
+  - prazos;
+  - riscos;
+  - cobranças;
+  - decisões técnicas;
+  - GRD;
+  - envio de documentos;
+  - protocolos;
+  - retorno de revisão.
+
+Regras específicas:
+
+- Se houver envio de projeto, memorial, relatório, prancha, orçamento, cronograma, documentação técnica ou entrega formal, preencher:
+  entrega_projeto = "sim"
+
+- Caso contrário:
+  entrega_projeto = "não"
+
+- Se houver indicação clara de aprovação de GRD, liberação de GRD, aceite de GRD ou validação de GRD:
+  grd_aprovado = "sim"
+
+- Se houver reprovação, pendência ou necessidade de ajuste:
+  grd_aprovado = "não"
+
+- Se não houver menção:
+  grd_aprovado = "não identificado"
+
+- Se Felipe foi cobrado e não respondeu:
+  status = "Pendente comigo"
+
+- Se Felipe cobrou terceiros e não houve retorno:
+  status = "Aguardando terceiro"
+
+- Se existir indefinição técnica, contratual ou gerencial:
+  status = "Travado"
+
+- Se houver somente comunicação sem ação:
+  status = "Informativo"
 
 E-mails:
 {emails}
@@ -159,7 +199,9 @@ colunas = [
     "prazo",
     "ultima_atualizacao",
     "proximo_passo",
-    "risco"
+    "risco",
+    "entrega_projeto",
+    "grd_aprovado"
 ]
 
 for coluna in colunas:
@@ -180,5 +222,4 @@ repo.create_issue(
 )
 
 print("Painel gerado com sucesso.")
-print(resumo_markdown)
 print(resumo_markdown)
