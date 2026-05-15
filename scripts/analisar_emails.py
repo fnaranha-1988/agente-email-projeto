@@ -1,18 +1,67 @@
 from github import Github
+from openai import OpenAI
 import os
 
 g = Github(os.environ["GITHUB_TOKEN"])
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 repo = g.get_repo("fnaranha-1988/agente-email-projeto")
 
 issues = repo.get_issues(state="open")
 
-print("\nPAINEL DE EMAILS\n")
+emails = []
 
 for issue in issues:
-    print("=================================")
-    print("ASSUNTO:", issue.title)
-    print("CRIADO EM:", issue.created_at)
-    print("TEXTO:")
-    print(issue.body[:1000])
-    print("=================================\n")
+    emails.append({
+        "titulo": issue.title,
+        "data": str(issue.created_at),
+        "corpo": issue.body[:3000]
+    })
+
+prompt = f"""
+Você é um agente de gestão de e-mails de Engenharia, Projetos e CapEx.
+
+Analise os e-mails abaixo, que vieram de Issues do GitHub.
+
+Agrupe por projeto ou assunto.
+
+Retorne uma tabela em Markdown com as colunas:
+Projeto/Assunto | Status | Pendência | Responsável | Prazo | Próximo passo
+
+Status permitidos:
+- Pendente comigo
+- Aguardando terceiro
+- Em andamento
+- Travado
+- Concluído
+- Informativo
+
+Regras:
+- Não invente informações.
+- Se não identificar, escreva "não identificado".
+- Se não houver ação, escreva "sem ação necessária".
+- Considere os e-mails mais recentes como mais importantes.
+
+E-mails:
+{emails}
+"""
+
+response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    temperature=0,
+    messages=[
+        {"role": "system", "content": "Você não inventa informações. Usa apenas os dados recebidos."},
+        {"role": "user", "content": prompt}
+    ]
+)
+
+painel = response.choices[0].message.content
+
+print("\nPAINEL GERADO PELA IA\n")
+print(painel)
+
+repo.create_issue(
+    title="Painel consolidado de e-mails",
+    body=painel,
+    labels=["painel"]
+)
