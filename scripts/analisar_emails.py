@@ -4,6 +4,8 @@ import os
 import json
 import pandas as pd
 from datetime import datetime
+from collections import defaultdict
+import re
 
 g = Github(os.environ["GITHUB_TOKEN"])
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
@@ -21,11 +23,49 @@ def eh_lixo(titulo, corpo):
     texto = f"{titulo} {corpo}".lower()
     return any(p in texto for p in PALAVRAS_LIXO)
 
+def extrair_conversation_id(titulo):
+    match = re.search(r"\[CONV-(.*?)\]", titulo)
+    return match.group(1) if match else None
+
+def fechar_duplicatas(issues_lista):
+    grupos = defaultdict(list)
+
+    for issue in issues_lista:
+        conv_id = extrair_conversation_id(issue.title)
+        if conv_id:
+            grupos[conv_id].append(issue)
+
+    for conv_id, lista in grupos.items():
+        if len(lista) <= 1:
+            continue
+
+        lista_ordenada = sorted(lista, key=lambda x: x.updated_at, reverse=True)
+        manter = lista_ordenada[0]
+        duplicadas = lista_ordenada[1:]
+
+        for dup in duplicadas:
+            try:
+                dup.create_comment(
+                    f"Fechada automaticamente como duplicata da Issue #{manter.number}."
+                )
+                dup.edit(
+                    state="closed",
+                    state_reason="not_planned"
+                )
+            except Exception as e:
+                print(f"Erro ao fechar duplicata #{dup.number}: {e}")
+
+issues_lista = list(repo.get_issues(state="open"))
+
+fechar_duplicatas(issues_lista)
+
 issues = repo.get_issues(state="open")
 emails = []
 
 for issue in issues:
-    if "painel" in [label.name.lower() for label in issue.labels]:
+    labels = [label.name.lower() for label in issue.labels]
+
+    if "painel" in labels:
         continue
 
     titulo = issue.title or ""
@@ -35,11 +75,16 @@ for issue in issues:
         continue
 
     emails.append({
+        "numero_issue": issue.number,
         "titulo": titulo,
-        "data": str(issue.created_at),
+        "data_criacao": str(issue.created_at),
         "ultima_atualizacao": str(issue.updated_at),
         "corpo": corpo[:3000]
     })
+
+if not emails:
+    print("Nenhum e-mail relevante encontrado para análise.")
+    exit()
 
 prompt = f"""
 Você é um agente de gestão de e-mails de Engenharia, Projetos e CapEx.
@@ -64,13 +109,17 @@ Status permitidos:
 - Concluído
 - Informativo
 
-Regras:
+Regras obrigatórias:
 - Não invente informações.
+- Use apenas os dados dos e-mails.
 - Se não identificar, escreva "não identificado".
 - Se não houver ação, escreva "sem ação necessária".
 - A data de última atualização deve considerar o e-mail mais recente daquele projeto/assunto.
 - Ignore e-mails automáticos, newsletters, notificações e assuntos sem relevância de gestão.
-- Priorize pendências, prazos, decisões e cobranças.
+- Priorize pendências, prazos, decisões, cobranças e riscos.
+- Se houver pergunta direcionada ao Felipe sem resposta posterior dele, classifique como "Pendente comigo".
+- Se Felipe cobrou alguém e não houver resposta posterior, classifique como "Aguardando terceiro".
+- Se houver decisão técnica, contratual ou gerencial sem definição, classifique como "Travado".
 
 E-mails:
 {emails}
@@ -125,10 +174,11 @@ df.to_excel(nome_arquivo, index=False)
 resumo_markdown = df.to_markdown(index=False)
 
 repo.create_issue(
-    title=f"Painel consolidado de e-mails - {datetime.now().strftime('%d/%m/%Y')}",
+    title=f"Painel consolidado de e-mails - {datetime.now().strftime('%d/%m/%Y %H:%M')}",
     body=resumo_markdown,
     labels=["painel"]
 )
 
 print("Painel gerado com sucesso.")
+print(resumo_markdown)
 print(resumo_markdown)
