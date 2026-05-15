@@ -24,7 +24,7 @@ jobs:
 
       - name: Instalar dependências
         run: |
-          pip install PyGithub openai pandas openpyxl
+          pip install PyGithub openai pandas openpyxl tabulate
 
       - name: Executar análise
         env:
